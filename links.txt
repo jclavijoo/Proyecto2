@@ -1,0 +1,14 @@
+Imagen Airflow:
+docker push jclavijoo/mlops-p2-airflow:tagname
+
+MlFlow:
+docker push jclavijoo/mlops-p2-mlflow:tagname
+
+Locust:
+docker push jclavijoo/mlops-p2-locust:tagname
+
+Api:
+docker push jclavijoo/mlops-p2-api:tagname
+
+Repo:
+https://github.com/jclavijoo/Proyecto2.git
