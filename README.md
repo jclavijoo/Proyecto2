@@ -1,7 +1,7 @@
 # Proyecto 2 – MLOps en Kubernetes (Rancher): readmisión hospitalaria de pacientes diabéticos
 
 Arquitectura MLOps completa desplegada en Kubernetes administrado con **Rancher** sobre las VMs
-Rocky Linux de la universidad: ingesta incremental orquestada con Airflow, capas RAW / CLEAN /
+Rocky, ingesta incremental orquestada con Airflow, capas RAW / CLEAN /
 INFERENCE en PostgreSQL, experimentos y registro de modelos en MLflow (PostgreSQL + MinIO), API
 de inferencia con FastAPI, interfaz en Streamlit, pruebas de carga con Locust y observabilidad
 con Prometheus + Grafana.
@@ -42,7 +42,7 @@ configuración está en ConfigMaps y las credenciales en Secrets. Todo vive en e
 ├── api/                        API FastAPI: Dockerfile, requirements.txt, main.py, features.py, ...
 ├── streamlit/                  Interfaz gráfica: Dockerfile, requirements.txt, app.py
 ├── locust/                     Dockerfile, requirements.txt, locustfile.py (como Niveles/3/locust)
-├── observabilidad/             Como Niveles/3/Observabilidad
+├── observabilidad/             
 │   ├── prometheus.yml          (docker compose)   prometheus-k8s.yml (Kubernetes)
 │   └── grafana/provisioning/ y grafana/dashboards/mlops-inference-api.json
 ├── db/                         Scripts SQL de creación de tablas (idempotentes)
@@ -53,24 +53,6 @@ configuración está en ConfigMaps y las credenciales en Secrets. Todo vive en e
 └── notebooks/                  EDA
 ```
 
-## 3. Preparar el clúster en Rancher
-
-Sirve tanto el clúster **`local`** (K3s dentro del contenedor de Rancher) como un clúster
-**Custom RKE2 `mlops`** con varias VMs (guía `Niveles/3/Kubernetes`). Para esta arquitectura se
-recomienda el clúster Custom: el `local` comparte la VM con Rancher y las *requests* del
-proyecto suman ~3 CPU y ~8 GiB de RAM.
-
-**3.1 kubectl y Helm en la VM.** En Rancher, entre al clúster y use **Download KubeConfig**:
-
-```bash
-mkdir -p ~/.kube && vim ~/.kube/config      # pegar el kubeconfig del clúster
-chmod 600 ~/.kube/config
-kubectl get nodes
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-```
-
-Si usa varios clústeres, agregue `--kubeconfig ~/.kube/mlops.yaml` a cada comando `kubectl` y
-`helm`, como en la guía.
 
 **3.2 StorageClass (necesaria para los PVC).**
 
@@ -357,10 +339,3 @@ y los values de Helm contra el esquema oficial del chart 1.20.0.
 | Grafana sin datos de CPU de cAdvisor | El clúster restringe `nodes/proxy`; las métricas del proceso de la API funcionan igual |
 | Cambió un `.sql` | Regenere `k8s/db-sql-configmap.yaml`, luego `kubectl delete job data-db-migrate` y `kubectl apply -f k8s/` |
 | No abre `http://IP_NODO:30xxx` en el clúster `local` | Use `kubectl port-forward --address 0.0.0.0` (§6) |
-
-## 12. Pendientes del equipo
-
-- [ ] Notebook de EDA en `notebooks/` (ver `notebooks/README.md`).
-- [ ] Ejecutar con el dataset real y documentar las métricas obtenidas y el límite de la API.
-- [ ] Evidencia de las imágenes publicadas en DockerHub.
-- [ ] Video de sustentación de máximo 10 minutos (guion en `docs/guion_sustentacion.md`).
