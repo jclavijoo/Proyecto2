@@ -1,0 +1,56 @@
+# Configuración de Prometheus para Kubernetes (en docker compose se usa prometheus.yml).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Métricas de la API de inferencia: descubre TODOS los pods con app=inference-api
+  # (si se escalan réplicas, cada una se recolecta por separado).
+  - job_name: inference-api
+    scrape_interval: 5s
+    metrics_path: /metrics
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces: {names: [mlops]}
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        regex: inference-api
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        regex: http
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+
+  # Métricas de infraestructura (CPU/memoria por contenedor) desde cAdvisor del
+  # kubelet, a través del API server. Requiere el ClusterRole de rbac.yaml.
+  - job_name: kubernetes-cadvisor
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+    metric_relabel_configs:
+      - source_labels: [namespace]
+        regex: mlops
+        action: keep
+
+  - job_name: minio
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ["minio:9000"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

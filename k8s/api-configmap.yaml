@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inference-api-config
+  labels:
+    app: inference-api
+  namespace: mlops
+data:
+  MLFLOW_TRACKING_URI: http://mlflow:5000
+  MODEL_NAME: diabetes-readmission
+  MODEL_ALIAS: champion
+  MODEL_REFRESH_SECONDS: '60'
+  DECISION_THRESHOLD: '0.5'
+  LOG_INFERENCES: 'true'
+  DATA_DB_HOST: postgres-data
+  DATA_DB_PORT: '5432'
+  DATA_DB_NAME: diabetes
+  DB_POOL_SIZE: '5'
+  DB_MAX_OVERFLOW: '10'

@@ -1,0 +1,12 @@
+# MLflow 3.x es obligatorio: mlflow 2.x exige packaging<25 y Airflow 3.1.8 exige packaging>=25.
+# Versiones alineadas con las constraints oficiales de Airflow 3.1.8 / Python 3.12
+# (la imagen base ya las trae: así pip no degrada paquetes del propio Airflow).
+# DEBEN coincidir con api/requirements.txt: el modelo se serializa aquí
+# y se deserializa en la API; versiones distintas rompen o alteran el pickle.
+numpy==2.4.2
+pandas==2.3.3
+scikit-learn==1.8.0
+mlflow-skinny==3.4.0
+matplotlib==3.10.0
+requests>=2.31
+psycopg2-binary>=2.9

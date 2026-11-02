@@ -1,0 +1,162 @@
+# Entorno de DESARROLLO y construcción de imágenes (la entrega se despliega en Kubernetes).
+#   docker compose up -d --build                     -> prueba local (funciona sin .env)
+# Para publicar en DockerHub, defina su usuario (en un archivo .env o en la terminal):
+#   cp .env.example .env    # y edite DOCKERHUB_USER
+#   docker compose build && docker compose push
+#   (la imagen de Airflow se construye aparte: ver airflow/Dockerfile)
+# Airflow se prueba en Kubernetes con Helm (guía Niveles/3/Airflow). Para entrenar en local
+# se puede ejecutar el DAG con `airflow dags test` apuntando a estos servicios.
+services:
+
+  postgres-data:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: diabetes
+      POSTGRES_USER: ${POSTGRES_USER:-mlops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CambieEstaClave123}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d diabetes"]
+      interval: 5s
+      retries: 20
+
+  db-migrate:
+    image: postgres:16-alpine
+    command: sh /migrations/run_migrations.sh
+    environment:
+      PGHOST: postgres-data
+      PGDATABASE: diabetes
+      PGUSER: ${POSTGRES_USER:-mlops}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-CambieEstaClave123}
+      API_DB_USER: ${API_DB_USER:-api_writer}
+      API_DB_PASSWORD: ${API_DB_PASSWORD:-CambieEstaClaveApi123}
+    volumes:
+      - ./db:/migrations
+    depends_on:
+      postgres-data:
+        condition: service_healthy
+    restart: "no"
+
+  postgres-mlflow:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mlflow
+      POSTGRES_USER: ${MLFLOW_DB_USER:-mlflow}
+      POSTGRES_PASSWORD: ${MLFLOW_DB_PASSWORD:-CambieEstaClaveMlflow123}
+    volumes:
+      - postgres_mlflow:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d mlflow"]
+      interval: 5s
+      retries: 20
+
+  minio:
+    image: ghcr.io/coollabsio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-CambieEstaClaveMinio123}
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  mlflow:
+    build: ./mlflow
+    image: ${DOCKERHUB_USER:-estudiante}/mlops-p2-mlflow:${IMAGE_TAG:-0.1.0}
+    command: >
+      sh -c "python /app/ensure_bucket.py &&
+             mlflow server --host 0.0.0.0 --port 5000
+             --backend-store-uri postgresql+psycopg2://${MLFLOW_DB_USER:-mlflow}:${MLFLOW_DB_PASSWORD:-CambieEstaClaveMlflow123}@postgres-mlflow:5432/mlflow
+             --artifacts-destination s3://mlflow-artifacts --serve-artifacts --workers 2"
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      MLFLOW_ARTIFACTS_BUCKET: mlflow-artifacts
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-CambieEstaClaveMinio123}
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres-mlflow:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  api:
+    build: ./api
+    image: ${DOCKERHUB_USER:-estudiante}/mlops-p2-api:${IMAGE_TAG:-0.1.0}
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_NAME: diabetes-readmission
+      MODEL_ALIAS: champion
+      DATA_DB_HOST: postgres-data
+      DATA_DB_NAME: diabetes
+      DATA_DB_USER: ${API_DB_USER:-api_writer}
+      DATA_DB_PASSWORD: ${API_DB_PASSWORD:-CambieEstaClaveApi123}
+    ports:
+      - "8000:8000"
+    cpus: 1
+    mem_limit: 1g
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      mlflow:
+        condition: service_started
+
+  streamlit:
+    build: ./streamlit
+    image: ${DOCKERHUB_USER:-estudiante}/mlops-p2-streamlit:${IMAGE_TAG:-0.1.0}
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+
+  locust:
+    build: ./locust
+    image: ${DOCKERHUB_USER:-estudiante}/mlops-p2-locust:${IMAGE_TAG:-0.1.0}
+    environment:
+      LOCUST_HOST: http://api:8000
+    ports:
+      - "8089:8089"
+    depends_on:
+      - api
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observabilidad/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-CambieEstaClaveGrafana123}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./observabilidad/grafana/provisioning:/etc/grafana/provisioning
+      - ./observabilidad/grafana/dashboards:/etc/grafana/dashboards
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  postgres_mlflow:
+  minio_data:
+
+# Nombre fijo para el bridge de la red: permite autorizarlo en firewalld
+# (en la VM con Rancher, el tráfico entre contenedores pasa por el firewall):
+#   sudo firewall-cmd --zone=trusted --change-interface=br-mlops
+#   sudo firewall-cmd --permanent --zone=trusted --change-interface=br-mlops
+networks:
+  default:
+    driver_opts:
+      com.docker.network.bridge.name: br-mlops

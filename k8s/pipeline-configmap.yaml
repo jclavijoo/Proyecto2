@@ -1,0 +1,32 @@
+# Configuración no sensible del DAG. Airflow (Helm) la inyecta con extraEnvFrom.
+# Las credenciales llegan desde postgres-data-secret (ver airflow-values.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipeline-config
+  labels:
+    app: airflow-pipeline
+  namespace: mlops
+data:
+  SOURCE_FILE_PATH: /opt/airflow/data/Diabetes.csv
+  SOURCE_FILE_URL: https://drive.usercontent.google.com/download?id=1k5-1caezQ3zWJbKaiMULTGq-3sz6uThC&export=download&confirm=t
+  BATCH_SIZE: '15000'
+  PIPELINE_SCHEDULE: '@hourly'
+  DATA_DB_HOST: postgres-data
+  DATA_DB_PORT: '5432'
+  DATA_DB_NAME: diabetes
+  MAX_REJECT_RATIO: '0.10'
+  TRAIN_RATIO: '0.70'
+  VAL_RATIO: '0.15'
+  MIN_POSITIVES_PER_SPLIT: '20'
+  MLFLOW_TRACKING_URI: http://mlflow:5000
+  MLFLOW_EXPERIMENT_NAME: diabetes-readmission
+  MODEL_NAME: diabetes-readmission
+  PRODUCTION_ALIAS: champion
+  CHALLENGER_ALIAS: challenger
+  PREVIOUS_ALIAS: previous-champion
+  PRIMARY_METRIC: f1
+  MIN_IMPROVEMENT: '0.0'
+  DECISION_THRESHOLD: '0.5'
+  CANDIDATE_MODELS: logistic_regression,random_forest,hist_gradient_boosting
+  RANDOM_SEED: '42'

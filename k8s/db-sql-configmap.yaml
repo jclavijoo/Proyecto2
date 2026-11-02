@@ -1,0 +1,192 @@
+# GENERADO a partir de archivos del repositorio. Si los modifica, regenere con:
+#   kubectl create configmap data-db-sql -n mlops --from-file=db/ --dry-run=client -o yaml > k8s/db-sql-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-db-sql
+  namespace: mlops
+data:
+  01_raw.sql: |
+    -- =========================================================================
+    -- Capa RAW: datos tal como llegan del archivo fuente (sin transformaciones
+    -- destructivas). Nunca se sobrescribe: solo se insertan filas nuevas y se
+    -- actualiza el estado de procesamiento.
+    -- Idempotente: puede ejecutarse varias veces.
+    -- =========================================================================
+    CREATE SCHEMA IF NOT EXISTS raw;
+
+    -- Control de lotes de carga (uno por ejecución del DAG)
+    CREATE TABLE IF NOT EXISTS raw.load_batches (
+        batch_id         TEXT PRIMARY KEY,                 -- <archivo>_<fila_ini>_<fila_fin>
+        source_file      TEXT        NOT NULL,
+        source_sha256    TEXT,
+        offset_start     INTEGER     NOT NULL,             -- filas del archivo ya cargadas antes del lote
+        offset_end       INTEGER     NOT NULL,
+        rows_read        INTEGER     NOT NULL,
+        rows_inserted    INTEGER     NOT NULL DEFAULT 0,
+        rows_duplicated  INTEGER     NOT NULL DEFAULT 0,
+        status           TEXT        NOT NULL CHECK (status IN ('LOADING', 'COMPLETED', 'FAILED')),
+        dag_run_id       TEXT,
+        started_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+        finished_at      TIMESTAMPTZ,
+        CONSTRAINT batch_size_max CHECK (rows_read <= 15000)
+    );
+    CREATE INDEX IF NOT EXISTS ix_load_batches_source ON raw.load_batches (source_file, status);
+    CREATE INDEX IF NOT EXISTS ix_load_batches_run ON raw.load_batches (dag_run_id);
+
+    -- Registros crudos: el contenido original de cada fila se guarda completo en JSONB
+    CREATE TABLE IF NOT EXISTS raw.diabetes_raw (
+        id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        batch_id           TEXT        NOT NULL REFERENCES raw.load_batches (batch_id),
+        load_timestamp     TIMESTAMPTZ NOT NULL DEFAULT now(),
+        source_file        TEXT        NOT NULL,           -- origen del dato
+        source_row_number  INTEGER     NOT NULL,           -- fila dentro del archivo
+        encounter_id       TEXT,                           -- identificador del registro
+        row_hash           CHAR(64)    NOT NULL UNIQUE,    -- control de duplicados
+        payload            JSONB       NOT NULL,           -- fila original sin transformar
+        status             TEXT        NOT NULL DEFAULT 'NEW'
+                           CHECK (status IN ('NEW', 'VALID', 'REJECTED', 'DUPLICATE',
+                                             'PROCESSED', 'EXCLUDED')),
+        status_reason      TEXT,
+        status_updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        dag_run_id         TEXT
+    );
+    CREATE INDEX IF NOT EXISTS ix_raw_status ON raw.diabetes_raw (status);
+    CREATE INDEX IF NOT EXISTS ix_raw_batch ON raw.diabetes_raw (batch_id);
+    CREATE INDEX IF NOT EXISTS ix_raw_encounter ON raw.diabetes_raw (encounter_id);
+
+    -- Resultado de cada validación de calidad
+    CREATE TABLE IF NOT EXISTS raw.quality_checks (
+        id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        checked_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        dag_run_id      TEXT,
+        rows_checked    INTEGER NOT NULL,
+        rows_valid      INTEGER NOT NULL,
+        rows_rejected   INTEGER NOT NULL,
+        rows_duplicate  INTEGER NOT NULL,
+        passed          BOOLEAN NOT NULL,
+        details         JSONB
+    );
+  02_clean.sql: |
+    -- =========================================================================
+    -- Capa CLEAN: datos limpios + ingeniería de características. Fuente única
+    -- del entrenamiento. Las columnas deben coincidir con
+    -- airflow/dags/diabetes_pipeline/features.py (FEATURE_COLUMNS).
+    -- =========================================================================
+    CREATE SCHEMA IF NOT EXISTS clean;
+
+    CREATE TABLE IF NOT EXISTS clean.diabetes_clean (
+        encounter_id             BIGINT PRIMARY KEY,
+        patient_nbr              BIGINT  NOT NULL,
+        raw_id                   BIGINT  NOT NULL,           -- trazabilidad hacia RAW
+        batch_id                 TEXT    NOT NULL,
+        -- categóricas
+        race                     TEXT    NOT NULL,
+        gender                   TEXT    NOT NULL,
+        admission_type           TEXT    NOT NULL,
+        discharge_group          TEXT    NOT NULL,
+        admission_source_group   TEXT    NOT NULL,
+        medical_specialty_group  TEXT    NOT NULL,
+        diag_1_group             TEXT    NOT NULL,
+        diag_2_group             TEXT    NOT NULL,
+        diag_3_group             TEXT    NOT NULL,
+        max_glu_serum            TEXT    NOT NULL,
+        a1c_result               TEXT    NOT NULL,
+        insulin                  TEXT    NOT NULL,
+        metformin                TEXT    NOT NULL,
+        -- numéricas
+        age_years                REAL     NOT NULL,
+        time_in_hospital         SMALLINT NOT NULL,
+        num_lab_procedures       SMALLINT NOT NULL,
+        num_procedures           SMALLINT NOT NULL,
+        num_medications          SMALLINT NOT NULL,
+        number_outpatient        SMALLINT NOT NULL,
+        number_emergency         SMALLINT NOT NULL,
+        number_inpatient         SMALLINT NOT NULL,
+        number_diagnoses         SMALLINT NOT NULL,
+        service_utilization      SMALLINT NOT NULL,
+        num_meds_changed         SMALLINT NOT NULL,
+        num_meds_active          SMALLINT NOT NULL,
+        med_change               SMALLINT NOT NULL,
+        diabetes_med             SMALLINT NOT NULL,
+        -- objetivo
+        readmitted               TEXT     NOT NULL,          -- valor original (NO, >30, <30)
+        readmitted_30            SMALLINT NOT NULL CHECK (readmitted_30 IN (0, 1)),
+        -- control
+        split                    TEXT CHECK (split IN ('train', 'val', 'test')),
+        transform_version        TEXT        NOT NULL,
+        processed_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+        split_assigned_at        TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS ix_clean_split ON clean.diabetes_clean (split);
+    CREATE INDEX IF NOT EXISTS ix_clean_patient ON clean.diabetes_clean (patient_nbr);
+    CREATE INDEX IF NOT EXISTS ix_clean_batch ON clean.diabetes_clean (batch_id);
+  03_inference.sql: |
+    -- =========================================================================
+    -- Capa INFERENCE: cada solicitud a /predict queda registrada. Insumo para
+    -- reentrenamiento, auditoría y monitoreo de deriva.
+    -- =========================================================================
+    CREATE SCHEMA IF NOT EXISTS inference;
+
+    CREATE TABLE IF NOT EXISTS inference.prediction_logs (
+        id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        request_id          TEXT        NOT NULL UNIQUE,      -- identificador de la solicitud
+        requested_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+        input_payload       JSONB       NOT NULL,             -- datos recibidos por la API
+        features            JSONB,                            -- características calculadas
+        prediction          SMALLINT,
+        prediction_label    TEXT,
+        probability         DOUBLE PRECISION,
+        decision_threshold  DOUBLE PRECISION,
+        model_name          TEXT,
+        model_version       TEXT,
+        model_alias         TEXT,
+        model_run_id        TEXT,
+        latency_ms          DOUBLE PRECISION,                 -- tiempo de respuesta
+        status              TEXT NOT NULL CHECK (status IN ('success', 'error')),
+        error_message       TEXT,
+        client_host         TEXT,
+        used_for_training   BOOLEAN NOT NULL DEFAULT FALSE
+    );
+    CREATE INDEX IF NOT EXISTS ix_pred_requested_at ON inference.prediction_logs (requested_at);
+    CREATE INDEX IF NOT EXISTS ix_pred_model_version ON inference.prediction_logs (model_version);
+
+    -- Vista de apoyo para monitoreo
+    CREATE OR REPLACE VIEW inference.v_hourly_summary AS
+    SELECT date_trunc('hour', requested_at) AS hour,
+           model_version,
+           count(*)                                   AS requests,
+           count(*) FILTER (WHERE status = 'error')   AS errors,
+           avg(probability)                           AS avg_probability,
+           avg(prediction::float)                     AS positive_rate,
+           percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95_latency_ms
+    FROM inference.prediction_logs
+    GROUP BY 1, 2;
+  04_roles.sql: |
+    -- =========================================================================
+    -- Usuario restringido para la API: solo puede INSERTAR en la capa de
+    -- inferencia (principio de mínimo privilegio). Airflow usa el usuario dueño.
+    -- Variables psql: :api_user, :api_password (ver run_migrations.sh)
+    -- =========================================================================
+    SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'api_user', :'api_password')
+    WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'api_user') \gexec
+
+    SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'api_user', :'api_password') \gexec
+    SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'api_user') \gexec
+    SELECT format('GRANT USAGE ON SCHEMA inference TO %I', :'api_user') \gexec
+    SELECT format('GRANT INSERT ON inference.prediction_logs TO %I', :'api_user') \gexec
+    SELECT format('GRANT USAGE ON ALL SEQUENCES IN SCHEMA inference TO %I', :'api_user') \gexec
+    SELECT format('REVOKE ALL ON SCHEMA raw, clean FROM %I', :'api_user') \gexec
+  run_migrations.sh: |
+    #!/bin/sh
+    # Ejecutado por el Job data-db-migrate. Aplica los .sql en orden (idempotentes).
+    set -eu
+    echo "Esperando a PostgreSQL en ${PGHOST}:${PGPORT:-5432}..."
+    until pg_isready -h "$PGHOST" -p "${PGPORT:-5432}" -U "$PGUSER" -d "$PGDATABASE" >/dev/null 2>&1; do
+      sleep 2
+    done
+    for f in /migrations/*.sql; do
+      echo ">> Aplicando $f"
+      psql -v ON_ERROR_STOP=1 -v api_user="$API_DB_USER" -v api_password="$API_DB_PASSWORD" -f "$f"
+    done
+    echo "Migraciones aplicadas correctamente."

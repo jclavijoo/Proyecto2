@@ -1,0 +1,2 @@
+# Los módulos auxiliares no son DAGs: el dag-processor no necesita parsearlos.
+diabetes_pipeline/

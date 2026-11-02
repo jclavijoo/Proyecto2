@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: locust-config
+  labels:
+    app: locust
+  namespace: mlops
+data:
+  LOCUST_HOST: http://inference-api:8000
+  LOCUST_WAIT_MIN: '0.5'
+  LOCUST_WAIT_MAX: '1.5'
+  LOCUST_STEP_LOAD: 'false'
+  LOCUST_STEP_USERS: '10'
+  LOCUST_STEP_SECONDS: '60'
+  LOCUST_MAX_USERS: '200'

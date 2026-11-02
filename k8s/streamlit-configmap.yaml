@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: streamlit-config
+  labels:
+    app: streamlit
+  namespace: mlops
+data:
+  API_URL: http://inference-api:8000
+  API_TIMEOUT_SECONDS: '10'

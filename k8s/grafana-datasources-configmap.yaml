@@ -1,0 +1,20 @@
+# GENERADO a partir de archivos del repositorio. Si los modifica, regenere con:
+#   kubectl create configmap grafana-datasources -n mlops --from-file=observabilidad/grafana/provisioning/datasources/ --dry-run=client -o yaml > k8s/grafana-datasources-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: mlops
+data:
+  prometheus.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        editable: true
+        jsonData:
+          timeInterval: 5s

@@ -1,0 +1,53 @@
+# Locust corre DENTRO del clúster: la carga llega directo al Service de la API
+# (sin pasar por port-forward, que sería un cuello de botella artificial).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: locust
+  labels:
+    app: locust
+  namespace: mlops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: locust
+  template:
+    metadata:
+      labels:
+        app: locust
+    spec:
+      containers:
+      - name: locust
+        image: jclavijoo/mlops-p2-locust:0.1.0
+        command:
+        - locust
+        args:
+        - -f
+        - /locust/locustfile.py
+        - --web-port
+        - '8089'
+        ports:
+        - name: http
+          containerPort: 8089
+        envFrom:
+        - configMapRef:
+            name: locust-config
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 20
+          periodSeconds: 30

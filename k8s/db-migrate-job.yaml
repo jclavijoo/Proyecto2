@@ -1,0 +1,67 @@
+# Crea/actualiza esquemas y tablas (scripts idempotentes de db/).
+# Para re-ejecutarlo: kubectl -n mlops delete job data-db-migrate && kubectl apply -f k8s/db-migrate-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-db-migrate
+  labels:
+    app: data-db-migrate
+  namespace: mlops
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: data-db-migrate
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: migrate
+        image: postgres:16-alpine
+        command:
+        - sh
+        - /migrations/run_migrations.sh
+        env:
+        - name: PGHOST
+          value: postgres-data
+        - name: PGPORT
+          value: '5432'
+        - name: PGDATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: postgres-data-config
+              key: POSTGRES_DB
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-data-secret
+              key: POSTGRES_USER
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-data-secret
+              key: POSTGRES_PASSWORD
+        - name: API_DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-data-secret
+              key: API_DB_USER
+        - name: API_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-data-secret
+              key: API_DB_PASSWORD
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+        volumeMounts:
+        - name: migrations
+          mountPath: /migrations
+      volumes:
+      - name: migrations
+        configMap:
+          name: data-db-sql

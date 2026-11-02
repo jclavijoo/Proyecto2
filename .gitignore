@@ -1,0 +1,12 @@
+# Datos y secretos
+airflow/data/*.csv
+.env
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+# Resultados de Locust
+results/
+*.log

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlflow-config
+  labels:
+    app: mlflow
+  namespace: mlops
+data:
+  MLFLOW_DB_HOST: postgres-mlflow
+  MLFLOW_DB_PORT: '5432'
+  MLFLOW_DB_NAME: mlflow
+  MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+  MLFLOW_ARTIFACTS_BUCKET: mlflow-artifacts
+  AWS_DEFAULT_REGION: us-east-1
+  MLFLOW_WORKERS: '2'

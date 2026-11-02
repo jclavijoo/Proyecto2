@@ -1,0 +1,122 @@
+# Valores del chart oficial apache-airflow/airflow para el proyecto.
+# Basado en Niveles/3/Airflow/values/values-local.yaml del curso.
+# Validado contra values.schema.json del chart 1.20.0 (appVersion 3.1.8).
+#
+#
+# Instalación (ver README):
+#   helm upgrade --install airflow apache-airflow/airflow --version 1.20.0 \
+#     --namespace mlops -f airflow/values/values-proyecto.yaml --wait --timeout 20m
+#
+# Requisito: aplicar primero los manifiestos (kubectl apply -f k8s/) porque aquí
+# se referencian el ConfigMap `pipeline-config` y el Secret `postgres-data-secret`.
+
+executor: LocalExecutor   # las tareas corren dentro del pod del scheduler
+
+images:
+  airflow:
+    repository: jclavijoo/mlops-p2-airflow   # imagen propia publicada en DockerHub
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+env:
+  - name: AIRFLOW__CORE__LOAD_EXAMPLES
+    value: "False"
+  - name: AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION
+    value: "True"
+  - name: AIRFLOW__CORE__PARALLELISM
+    value: "4"
+  - name: AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG
+    value: "4"
+
+# Configuración no sensible del pipeline (k8s/pipeline-configmap.yaml)
+extraEnvFrom: |
+  - configMapRef:
+      name: pipeline-config
+
+# Credenciales de la BD de datos (k8s/01-secrets.yaml)
+extraEnv: |
+  - name: DATA_DB_USER
+    valueFrom:
+      secretKeyRef:
+        name: postgres-data-secret
+        key: POSTGRES_USER
+  - name: DATA_DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: postgres-data-secret
+        key: POSTGRES_PASSWORD
+
+# ------------------------------- recursos ---------------------------------- #
+# Con LocalExecutor el entrenamiento ocurre en el scheduler: es el pod más grande.
+scheduler:
+  resources:
+    requests: {cpu: 500m, memory: 1536Mi}
+    limits: {cpu: "2", memory: 4Gi}
+  logGroomerSidecar:
+    resources:
+      requests: {cpu: 20m, memory: 128Mi}
+      limits: {cpu: 200m, memory: 512Mi}
+
+apiServer:
+  service:
+    type: NodePort          # UI en http://<IP_NODO>:30080 (no hay LoadBalancer en las VMs)
+    ports:
+      - name: api-server
+        port: 8080
+        nodePort: 30080
+  resources:
+    requests: {cpu: 250m, memory: 768Mi}
+    limits: {cpu: "1", memory: 1536Mi}
+
+dagProcessor:
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {cpu: 500m, memory: 1Gi}
+  logGroomerSidecar:
+    resources:
+      requests: {cpu: 20m, memory: 128Mi}
+      limits: {cpu: 200m, memory: 512Mi}
+
+triggerer:
+  enabled: true
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 768Mi}
+  logGroomerSidecar:
+    resources:
+      requests: {cpu: 20m, memory: 128Mi}
+      limits: {cpu: 200m, memory: 512Mi}
+
+workers:          # no se usan con LocalExecutor, pero se dejan acotados
+  replicas: 1
+  celery:
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: 500m, memory: 1Gi}
+
+migrateDatabaseJob:
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 1Gi}
+
+createUserJob:
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 1Gi}
+
+statsd:
+  enabled: false
+
+redis:
+  enabled: false
+
+# Base de metadatos propia de Airflow (subchart). Es independiente de la BD de
+# datos del proyecto y de la BD de MLflow.
+postgresql:
+  enabled: true
+  primary:
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: 500m, memory: 512Mi}
+  # El chart 1.20.0 ya usa bitnamilegacy/postgresql (Bitnami retiró sus
+  # imágenes públicas en 2025).
