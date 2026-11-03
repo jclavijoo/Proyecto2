@@ -1,5 +1,16 @@
 # Proyecto 2 – MLOps en Kubernetes (Rancher): readmisión hospitalaria de pacientes diabéticos
 
+## Grupo 3
+
+### Integrantes
+* **Juan David Clavijo Ortiz**
+* **Laura Sofía Rodríguez Pérez**
+* **Joshua Alexander Valero Lozano**
+
+## Link de Youtube: https://youtu.be/iDZpyuTl-RY
+
+# Descripción
+
 Arquitectura MLOps completa desplegada en Kubernetes administrado con **Rancher** sobre las VMs
 Rocky, ingesta incremental orquestada con Airflow, capas RAW / CLEAN /
 INFERENCE en PostgreSQL, experimentos y registro de modelos en MLflow (PostgreSQL + MinIO), API

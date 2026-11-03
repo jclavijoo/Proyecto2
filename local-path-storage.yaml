@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+<title>Access Denied</title>
+<style type="text/css">body {margin:0;font-family:verdana,sans-serif;} h1 {margin:0;padding:12px 25px;background-color:#343434;color:#ddd} p {margin:12px 25px;} strong {color:#E0042D;}</style>
+</head>
+<body>
+<h1>Access Denied</h1>
+<p>
+<strong>You are attempting to access a forbidden site.</strong><br/><br/>
+Consult your system administrator for details.
+</p>
+</body>
+</html>

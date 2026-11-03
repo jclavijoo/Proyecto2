@@ -14,7 +14,7 @@ executor: LocalExecutor   # las tareas corren dentro del pod del scheduler
 
 images:
   airflow:
-    repository: jclavijoo/mlops-p2-airflow   # imagen propia publicada en DockerHub
+    repository: joshin290/mlops-p2-airflow   # imagen propia publicada en DockerHub
     tag: "0.1.0"
     pullPolicy: IfNotPresent
 

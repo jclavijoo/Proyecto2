@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: inference-api
-        image: jclavijoo/mlops-p2-api:0.1.0
+        image: joshin290/mlops-p2-api:0.1.0
         ports:
         - name: http
           containerPort: 8000
