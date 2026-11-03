@@ -13,7 +13,7 @@ services:
     environment:
       POSTGRES_DB: diabetes
       POSTGRES_USER: ${POSTGRES_USER:-mlops}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CambieEstaClave123}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postGres123}
     ports:
       - "5432:5432"
     volumes:
@@ -32,7 +32,7 @@ services:
       PGUSER: ${POSTGRES_USER:-mlops}
       PGPASSWORD: ${POSTGRES_PASSWORD:-CambieEstaClave123}
       API_DB_USER: ${API_DB_USER:-api_writer}
-      API_DB_PASSWORD: ${API_DB_PASSWORD:-CambieEstaClaveApi123}
+      API_DB_PASSWORD: ${API_DB_PASSWORD:-admin123api}
     volumes:
       - ./db:/migrations
     depends_on:
@@ -45,7 +45,7 @@ services:
     environment:
       POSTGRES_DB: mlflow
       POSTGRES_USER: ${MLFLOW_DB_USER:-mlflow}
-      POSTGRES_PASSWORD: ${MLFLOW_DB_PASSWORD:-CambieEstaClaveMlflow123}
+      POSTGRES_PASSWORD: ${MLFLOW_DB_PASSWORD:-Mlflow123}
     volumes:
       - postgres_mlflow:/var/lib/postgresql/data
     healthcheck:
@@ -58,7 +58,7 @@ services:
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-CambieEstaClaveMinio123}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniOadmin123}
       MINIO_PROMETHEUS_AUTH_TYPE: public
     ports:
       - "9000:9000"
@@ -72,13 +72,13 @@ services:
     command: >
       sh -c "python /app/ensure_bucket.py &&
              mlflow server --host 0.0.0.0 --port 5000
-             --backend-store-uri postgresql+psycopg2://${MLFLOW_DB_USER:-mlflow}:${MLFLOW_DB_PASSWORD:-CambieEstaClaveMlflow123}@postgres-mlflow:5432/mlflow
+             --backend-store-uri postgresql+psycopg2://${MLFLOW_DB_USER:-mlflow}:${MLFLOW_DB_PASSWORD:-Mlflow123}@postgres-mlflow:5432/mlflow
              --artifacts-destination s3://mlflow-artifacts --serve-artifacts --workers 2"
     environment:
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       MLFLOW_ARTIFACTS_BUCKET: mlflow-artifacts
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-CambieEstaClaveMinio123}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-miniOadmin123}
     ports:
       - "5000:5000"
     depends_on:
@@ -97,7 +97,7 @@ services:
       DATA_DB_HOST: postgres-data
       DATA_DB_NAME: diabetes
       DATA_DB_USER: ${API_DB_USER:-api_writer}
-      DATA_DB_PASSWORD: ${API_DB_PASSWORD:-CambieEstaClaveApi123}
+      DATA_DB_PASSWORD: ${API_DB_PASSWORD:-admin123api}
     ports:
       - "8000:8000"
     cpus: 1
@@ -138,7 +138,7 @@ services:
   grafana:
     image: grafana/grafana:11.3.0
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-CambieEstaClaveGrafana123}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-Grafana123}
     ports:
       - "3000:3000"
     volumes:
