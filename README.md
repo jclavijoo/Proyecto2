@@ -180,6 +180,15 @@ kubectl port-forward --address 0.0.0.0 svc/airflow-api-server 8080:8080
 1. **Airflow:** active `diabetes_mlops_pipeline` y ejecútelo. Cada ejecución carga **un lote de
    15.000 filas**: el dataset (~101.766 filas) requiere 7 ejecuciones. Al terminar los datos,
    el DAG se detiene en `has_data_to_process`, salvo que se lance con `force_retrain=true`.
+
+    <p align="center">
+      <img src="Proyecto2/evidencias/Airflow.png" alt="Ejecución de Airflow" width="800">
+    </p>
+
+    <p align="center">
+      <img src="Proyecto2/evidencias/Airflow2.png" alt="Ejecución de Airflow" width="800">
+    </p>
+
 2. **Capas de datos:**
    ```bash
    kubectl exec -it postgres-data-0 -- psql -U mlops -d diabetes -c "SELECT batch_id, rows_read, rows_inserted, status FROM raw.load_batches;"
