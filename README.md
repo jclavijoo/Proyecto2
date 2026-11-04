@@ -86,6 +86,14 @@ kubectl patch storageclass local-path -p '{"metadata":{"annotations":{"storagecl
 
 Cada imagen se construye dentro de su carpeta, como en los ejercicios:
 
+
+
+  <p align="center">
+    <img src="evidencias/Docker_hub_imagenes.png" alt="API 3" width="800">
+  </p>
+
+
+
 ```bash
 docker login
 
@@ -198,6 +206,16 @@ kubectl port-forward --address 0.0.0.0 svc/airflow-api-server 8080:8080
    ```
 3. **MLflow:** experimento `diabetes-readmission` (3 runs por ejecución) y modelo registrado
    `diabetes-readmission` con los alias `@champion`, `@challenger` y `@previous-champion`.
+
+   <p align="center">
+      <img src="evidencias/MLFLow_metricas.png" alt="MLFlow 1" width="800">
+    </p>
+
+    <p align="center">
+      <img src="evidencias/MLFlow" alt="MLFLow 2" width="800">
+    </p>
+
+
 4. **API:**
    ```bash
    curl http://IP_NODO:30800/model-info
@@ -223,6 +241,16 @@ kubectl port-forward --address 0.0.0.0 svc/airflow-api-server 8080:8080
 Grafana abre directamente el dashboard **MLOps - API de inferencia**, que incluye: total de
 solicitudes, solicitudes por segundo, latencia promedio, latencias p50/p95/p99, errores, tasa de
 error, CPU y memoria del pod, *throttling* de CPU, predicciones por clase y modelo en producción.
+
+  <p align="center">
+    <img src="evidencias/Grafana.png" alt="Grafana" width="800">
+  </p>
+
+
+  <p align="center">
+    <img src="evidencias/Grafana2.png" alt="Grafana2" width="800">
+  </p>
+
 
 **Cómo encontrar el punto de degradación:**
 
