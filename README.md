@@ -203,6 +203,18 @@ kubectl port-forward --address 0.0.0.0 svc/airflow-api-server 8080:8080
    curl http://IP_NODO:30800/model-info
    curl -X POST http://IP_NODO:30800/predict -H "Content-Type: application/json" -d '{"gender":"Female","age":"[70-80)","admission_type_id":1,"discharge_disposition_id":1,"admission_source_id":7,"time_in_hospital":5,"num_lab_procedures":45,"num_procedures":1,"num_medications":18,"diag_1":"428","number_diagnoses":9,"insulin":"Up","diabetesMed":"Yes"}'
    ```
+    <p align="center">
+      <img src="evidencias/API.png" alt="API 1" width="800">
+    </p>
+
+    <p align="center">
+      <img src="evidencias/API2_predict.png" alt="API 2" width="800">
+    </p>
+
+    <p align="center">
+      <img src="evidencias/API3_metrics.png" alt="API 3" width="800">
+    </p>
+
 5. **Streamlit:** use "Cargar ejemplo" y "Predecir". El escenario "Caso inválido" muestra los
    errores de validación de la API campo por campo.
 
