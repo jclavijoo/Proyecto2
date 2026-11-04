@@ -182,11 +182,11 @@ kubectl port-forward --address 0.0.0.0 svc/airflow-api-server 8080:8080
    el DAG se detiene en `has_data_to_process`, salvo que se lance con `force_retrain=true`.
 
     <p align="center">
-      <img src="Proyecto2/evidencias/Airflow.png" alt="Ejecución de Airflow" width="800">
+      <img src="evidencias/Airflow.png" alt="Ejecución de Airflow" width="800">
     </p>
 
     <p align="center">
-      <img src="Proyecto2/evidencias/Airflow2.png" alt="Ejecución de Airflow" width="800">
+      <img src="evidencias/Airflow2.png" alt="Ejecución de Airflow" width="800">
     </p>
 
 2. **Capas de datos:**
