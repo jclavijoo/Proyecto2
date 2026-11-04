@@ -30,7 +30,7 @@ services:
       PGHOST: postgres-data
       PGDATABASE: diabetes
       PGUSER: ${POSTGRES_USER:-mlops}
-      PGPASSWORD: ${POSTGRES_PASSWORD:-CambieEstaClave123}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postGres123}
       API_DB_USER: ${API_DB_USER:-api_writer}
       API_DB_PASSWORD: ${API_DB_PASSWORD:-admin123api}
     volumes:
