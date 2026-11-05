@@ -53,6 +53,69 @@ configuración está en ConfigMaps y las credenciales en Secrets. Todo vive en e
 * **Prometheus:** Sistema de monitoreo y base de datos de series temporales. Recolecta métricas en tiempo real mediante *scraping* periódico tanto del endpoint `/metrics` expuesto por la API de inferencia como de las métricas de recursos de infraestructura (uso de CPU, memoria y *throttling* de contenedores) proveídas por Kubernetes.
 * **Grafana:** Plataforma de análisis y visualización de datos conectada a Prometheus. Despliega de forma automática (mediante *provisioning*) el dashboard **MLOps - API de inferencia**, permitiendo observar en tiempo real la tasa de peticiones por segundo (RPS), latencias (p50, p95, p99), porcentaje de errores, distribución de clases predichas y consumo de cómputo de los pods.
 
+### 1.2 Flujo de trabajo de la arquitectura
+
+Todo el flujo de trabajo se ejecuta de manera contenerizada dentro del clúster de **Kubernetes** (en el namespace `mlops`), dividiendo la operación en dos fases principales (Entrenamiento e Inferencia) acompañadas por un módulo de observabilidad dedicado al servicio de predicción en producción[cite: 5]:
+
+<p align="center">
+  <img src="evidencias/Rancher_kubernets.png" alt="Diagrama de Arquitectura y Flujo de Trabajo" width="800">
+</p>
+
+<p align="center">
+  <img src="evidencias/Rancher_servicios.png" alt="Diagrama de Arquitectura y Flujo de Trabajo" width="800">
+</p>
+
+
+#### 1. Fase de Entrenamiento
+1. **Ingesta desde el archivo fuente (`Archivo` → `Airflow`):** El ciclo inicia con la lectura del archivo de datos (`Diabetes.csv`)[cite: 5]. **Apache Airflow** orquesta la extracción de manera incremental en lotes de 15.000 registros por ejecución.
+
+<p align="center">
+  <img src="evidencias/Airflow2.png" alt="Diagrama de Arquitectura y Flujo de Trabajo" width="800">
+</p>
+
+2. **Procesamiento y persistencia por capas (`Airflow` ↔ `PostgreSQL Data`):** Airflow mantiene una comunicación bidireccional con la base de datos **PostgreSQL Data**[cite: 5]:
+   - Primero, inserta los lotes crudos en el esquema `raw` (`raw.diabetes_raw`) y ejecuta las validaciones de calidad.
+   - Segundo, lee los registros válidos, aplica la ingeniería de características (`features.py`), asigna de forma determinista la partición correspondiente (`train`, `val`, `test`) y guarda los datos procesados en el esquema `clean` (`clean.diabetes_clean`).
+   - Tercero, consulta las particiones limpias desde `clean` para alimentar el entrenamiento de los modelos.
+3. **Entrenamiento y registro de modelos (`Airflow` ↔ `MLflow`):** Con los datos listos, Airflow entrena tres modelos candidatos en paralelo (Regresión Logística, Random Forest y HistGradientBoosting) e interactúa con el servidor de **MLflow** para registrar cada experimento, evaluar al nuevo retador (`@challenger`) frente al modelo campeón vigente (`@champion`) sobre el conjunto de prueba y promover únicamente al modelo que supere el desempeño en la métrica F1[cite: 5].
+4. **Almacenamiento del backend de MLflow (`MLflow` → `PostgreSQL Metadatos` + `MinIO`):** Para persistir toda la información del ciclo de vida de los modelos, MLflow delega el almacenamiento en dos componentes internos[cite: 5]:
+   - **Metadatos MLflow (PostgreSQL):** Guarda los parámetros de entrenamiento, métricas cuantitativas, etiquetas, linaje de ejecuciones y el control de versiones/alias del *Model Registry*[cite: 5].
+   - **Almacén de objetos MLflow (MinIO):** Almacena en el bucket S3 (`mlflow-artifacts`) los artefactos pesados generados en cada ejecución, incluyendo los pipelines y modelos serializados (`.pkl`)[cite: 5].
+
+<p align="center">
+  <img src="evidencias/MLFlow.png" alt="Diagrama de Arquitectura y Flujo de Trabajo" width="800">
+</p>
+
+#### 2. Fase de Inferencia
+1. **Carga y actualización continua del modelo (`MLflow` → `API de inferencia`):** La **API de inferencia (FastAPI)** consulta a MLflow al iniciar (y periódicamente cada 60 segundos en segundo plano) para resolver el alias `@champion`, descargando en memoria la versión productiva del modelo desde MinIO y aplicando *hot-swap* sin tiempo de inactividad cuando Airflow promueve un nuevo campeón[cite: 5].
+
+<p align="center">
+  <img src="evidencias/API.png" alt="Diagrama de Arquitectura y Flujo de Trabajo" width="800">
+</p>
+
+2. **Consumo del servicio (`Streamlit` ↔ `API de inferencia` y `Locust` ↔ `API de inferencia`):**
+   - **Streamlit:** Envía solicitudes individuales con datos clínicos de pacientes hacia la API y recibe en respuesta la predicción de readmisión (`<30` días), la probabilidad asociada y la versión del modelo utilizado para mostrarlos en la interfaz gráfica[cite: 5].
+   - **Locust:** Genera tráfico sintético concurrente directamente contra el Service interno de la API dentro de Kubernetes para evaluar su capacidad de respuesta, estabilidad y escalamiento horizontal bajo estrés[cite: 5].
+
+  <p align="center">
+    <img src="evidencias/Locust.png" alt="Diagrama de Arquitectura y Flujo de Trabajo" width="800">
+  </p>
+3. **Registro de auditoría (`API de inferencia` → `PostgreSQL Data`):** Por cada solicitud procesada, la API envía de manera asíncrona (*BackgroundTask*) los datos de entrada, las características calculadas, el resultado predicho, la versión del modelo y la latencia hacia el esquema `inference` (`inference.prediction_logs`) dentro de **PostgreSQL Data**, utilizando credenciales restringidas de solo inserción (`api_writer`)[cite: 5].
+
+#### 3. Observabilidad (Exclusiva para la Fase de Inferencia)
+El bloque de **Observabilidad** (**Prometheus** + **Grafana**) monitorea exclusivamente el desempeño operativo y de negocio de la **Fase de Inferencia**[cite: 5]:
+- **Recolección de métricas (Prometheus):** Realiza *scraping* continuo sobre el endpoint `/metrics` expuesto por la **API de inferencia (FastAPI)** y sobre las métricas de los pods de inferencia en Kubernetes, capturando el volumen de peticiones, tiempos de respuesta, fallos HTTP, distribución de predicciones y consumo de CPU/memoria.
+
+<p align="center">
+  <img src="evidencias/Prometheus.png" alt="Diagrama de Arquitectura y Flujo de Trabajo" width="800">
+</p>
+
+- **Visualización y análisis de degradación (Grafana):** Consulta a Prometheus para alimentar en tiempo real el dashboard **MLOps - API de inferencia**, permitiendo supervisar durante las pruebas con **Locust** y el uso en **Streamlit** las solicitudes por segundo (RPS), latencias en percentiles (p50, p95, p99), tasa de errores, *throttling* de CPU de las réplicas de la API y la versión del modelo actualmente en producción.
+
+<p align="center">
+  <img src="evidencias/Grafana.png" alt="Diagrama de Arquitectura y Flujo de Trabajo" width="800">
+</p>
+
 ## 2. Estructura del repositorio
 
 ```
@@ -192,7 +255,9 @@ Cuando se conecta a la máquina virtual mediante la extensión **Remote - SSH** 
    - *(Opcional)* Si requiere que el puerto sea accesible desde otra máquina en la misma red, haga clic derecho sobre la fila del puerto, seleccione **Port Visibility** y cámbielo de `Private` a **`Public`**.
    - Pase el cursor sobre la dirección en **Forwarded Address** y haga clic en el ícono del globo (**Open in Browser**) o copie `http://localhost:<puerto>` en su navegador local.
 
-
+  <p align="center">
+    <img src="evidencias/VisualCode_puertos.png" alt="Grafana" width="800">
+  </p>
 
 ## 4. Construir y publicar las imágenes (DockerHub)
 
@@ -409,17 +474,6 @@ kubectl port-forward -n mlops --address 0.0.0.0 svc/grafana 3000:3000 &
 
 5. **Streamlit:** use "Cargar ejemplo" y "Predecir". El escenario "Caso inválido" muestra los errores de validación de la API campo por campo.
 
-## 8. Pruebas de carga y observabilidad
-
-Grafana abre directamente el dashboard **MLOps - API de inferencia**, que incluye: total de solicitudes, solicitudes por segundo, latencia promedio, latencias p50/p95/p99, errores, tasa de error, CPU y memoria del pod, *throttling* de CPU, predicciones por clase y modelo en producción.
-
-  <p align="center">
-    <img src="evidencias/Grafana.png" alt="Grafana" width="800">
-  </p>
-
-  <p align="center">
-    <img src="evidencias/Grafana2.png" alt="Grafana2" width="800">
-  </p>
 
 ## 8. Pruebas de carga y observabilidad
 
@@ -448,8 +502,26 @@ error, CPU y memoria del pod, *throttling* de CPU, predicciones por clase y mode
    las réplicas nuevas automáticamente. En un clúster multinodo, `kubectl get pods -o wide`
    muestra en qué nodo quedó cada una.
 
+  <p align="center">
+    <img src="evidencias/Prometheus.png" alt="Grafana2" width="800">
+  </p>  
+
+
 Locust corre dentro del clúster contra el Service de la API, así que la carga no pasa por un
 port-forward, que sería un cuello de botella artificial.
+
+  <p align="center">
+    <img src="evidencias/Locust.png" alt="Grafana2" width="800">
+  </p>  
+
+
+  <p align="center">
+    <img src="evidencias/Locust_graficas.png" alt="Grafana" width="800">
+  </p>
+
+
+  
+
 
 ## 9. Decisiones técnicas
 
@@ -517,6 +589,19 @@ Antes de entregar la estructura se ejecutó una prueba de punta a punta (fuera d
 - 4 ejecuciones del DAG: 3 lotes (15.000 + 15.000 + 10.025) y una cuarta que se detuvo en el short-circuit al no quedar datos.
 - RAW: 60 filas rechazadas, 25 duplicadas y 8.880 excluidas, cada una con su motivo. Ningún paciente quedó en más de una partición.
 - MLflow: 9 runs con métricas y artefactos; versiones v1 → v2 → v3 promovidas por comparación contra el campeón, con alias y tags. Una quinta ejecución con `force_retrain` generó v4, que empató con el campeón y fue rechazada (rama `keep_current_champion`), como corresponde.
+
+  <p align="center">
+    <img src="evidencias/MLFlow.png" alt="Grafana2" width="800">
+  </p>  
+
+  <p align="center">
+    <img src="evidencias/MLFlow_modelos.png" alt="Grafana2" width="800">
+  </p>  
+
+  <p align="center">
+    <img src="evidencias/MLFlow_metricas.png" alt="Grafana2" width="800">
+  </p>  
+
 - API: el hot-swap funcionó (mover `@champion` de v3 a v1 cambió el modelo servido sin reiniciar), los 422 se devuelven correctamente y hubo 0 fallos al registrar en BD.
 - Streamlit: los tres escenarios de ejemplo funcionaron.
 - Locust: 0 fallos.
