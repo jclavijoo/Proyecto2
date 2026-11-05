@@ -322,21 +322,31 @@ docker compose up -d --build
 docker compose ps
 ```
 
-## 6. Acceso a las interfaces
+# 6. Acceso a las interfaces y Credenciales
 
-En un clúster **Custom RKE2**, use la IP de cualquier nodo:
+En un clúster **Custom RKE2**, use la IP de cualquier nodo con el NodePort correspondiente. En desarrollo local (`docker compose` o `port-forward`), utilice el puerto local indicado:
 
-| Interfaz | URL | Credenciales |
-|---|---|---|
-| Airflow | http://IP_NODO:30080 | admin / admin (usuario por defecto del chart) |
-| MLflow | http://IP_NODO:30500 | – |
-| MinIO | http://IP_NODO:30901 | `minio-secret` |
-| API (Swagger) | http://IP_NODO:30800/docs | – |
-| Streamlit | http://IP_NODO:30501 | – |
-| Locust | http://IP_NODO:30089 | – |
-| Prometheus | http://IP_NODO:30909 | – |
-| Grafana | http://IP_NODO:30300 | `grafana-secret` |
+| Interfaz / Servicio | URL (Kubernetes NodePort) | URL (Local / Port-Forward) | Usuario por defecto | Contraseña por defecto | Secret / Variable asociada |
+|---|---|---|---|---|---|
+| **Airflow** | `http://IP_NODO:30080` | `http://localhost:8080` | `admin` | `admin` | Chart oficial de Airflow |
+| **MLflow** | `http://IP_NODO:30500` | `http://localhost:5000` | – | – | Sin autenticación |
+| **MinIO (Consola)** | `http://IP_NODO:30901` | `http://localhost:9001` | `minioadmin` | `miniOadmin123` | `minio-secret` (`MINIO_ROOT_USER` / `PASSWORD`) |
+| **MinIO (API S3)** | Interno (`minio:9000`) | `http://localhost:9000` | `minioadmin` | `miniOadmin123` | Bucket: `mlflow-artifacts` |
+| **API (Swagger)** | `http://IP_NODO:30800/docs` | `http://localhost:8000/docs` | – | – | Sin autenticación |
+| **Streamlit** | `http://IP_NODO:30501` | `http://localhost:8501` | – | – | Sin autenticación |
+| **Locust** | `http://IP_NODO:30089` | `http://localhost:8089` | – | – | Sin autenticación |
+| **Prometheus** | `http://IP_NODO:30909` | `http://localhost:9090` | – | – | Sin autenticación |
+| **Grafana** | `http://IP_NODO:30300` | `http://localhost:3000` | `admin` | `Grafana123` | `grafana-secret` (`GF_SECURITY_ADMIN_PASSWORD`) |
 
+### 6.1 Credenciales internas de Bases de Datos (PostgreSQL)
+
+| Instancia / Rol | Host interno (K8s / Compose) | Puerto | Base de Datos | Usuario por defecto | Contraseña por defecto | Variables en `.env` / `01-secrets.yaml` |
+|---|---|---|---|---|---|---|
+| **PostgreSQL de Datos (Admin / Airflow)** | `postgres-data` | `5432` | `diabetes` | `mlops` | `postGres123` | `POSTGRES_USER` / `POSTGRES_PASSWORD` |
+| **PostgreSQL de Datos (Escritura API)** | `postgres-data` | `5432` | `diabetes` | `api_writer` | `admin123api` | `API_DB_USER` / `API_DB_PASSWORD` |
+| **PostgreSQL de Metadatos (MLflow)** | `postgres-mlflow` | `5432` | `mlflow` | `mlflow` | `Mlflow123` | `MLFLOW_DB_USER` / `MLFLOW_DB_PASSWORD` |
+
+### 6.2 Reenvío de puertos (`port-forward`) para clúster `local`
 En el clúster **`local`**, los NodePort quedan dentro del contenedor de Rancher, así que se usa `port-forward` como en la guía:
 
 ```bash
