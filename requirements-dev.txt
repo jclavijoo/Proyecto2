@@ -1,4 +1,0 @@
-# Para correr las pruebas: pip install -r requirements-dev.txt && pytest -q tests/
-pandas==2.3.3
-numpy==2.4.2
-pytest

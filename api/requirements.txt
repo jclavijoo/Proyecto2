@@ -1,4 +1,6 @@
 fastapi==0.115.12
+# pydantic fijo: con 2.12+ FastAPI 0.115 emite advertencias de compatibilidad
+pydantic==2.11.7
 uvicorn[standard]==0.34.2
 prometheus-client==0.21.1
 sqlalchemy==2.0.36

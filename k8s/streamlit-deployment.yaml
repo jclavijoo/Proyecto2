@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: streamlit
-        image: joshin290/mlops-p2-streamlit:0.1.0
+        image: DOCKERHUB_USER/mlops-p2-streamlit:0.1.0
         ports:
         - name: http
           containerPort: 8501

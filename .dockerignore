@@ -1,0 +1,13 @@
+# Solo afecta a Dockerfile.test (las demás imágenes se construyen desde su carpeta)
+.git
+.github
+**/__pycache__
+**/.pytest_cache
+airflow/data
+k8s
+infra
+docs
+notebooks
+observabilidad
+db
+.env

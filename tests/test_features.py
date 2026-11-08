@@ -61,10 +61,3 @@ def test_particion_deterministica():
     assert features.assign_split(123) == features.assign_split("123")
     share = pd.Series([features.assign_split(i) for i in range(5000)]).value_counts(normalize=True)
     assert 0.65 < share["train"] < 0.75
-
-def test_():
-    pytest.raises 
-    pass
-
-def test_2():
-    pass

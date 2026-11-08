@@ -14,7 +14,7 @@ executor: LocalExecutor   # las tareas corren dentro del pod del scheduler
 
 images:
   airflow:
-    repository: joshin290/mlops-p2-airflow   # imagen propia publicada en DockerHub
+    repository: DOCKERHUB_USER/mlops-p2-airflow   # imagen propia publicada en DockerHub
     tag: "0.1.0"
     pullPolicy: IfNotPresent
 
@@ -53,7 +53,7 @@ scheduler:
     requests: {cpu: 500m, memory: 1536Mi}
     limits: {cpu: "2", memory: 4Gi}
   logGroomerSidecar:
-    resources:
+    resources:                      # 128Mi no alcanza: fue OOMKilled en Rancher
       requests: {cpu: 20m, memory: 128Mi}
       limits: {cpu: 200m, memory: 512Mi}
 
@@ -73,7 +73,7 @@ dagProcessor:
     requests: {cpu: 100m, memory: 512Mi}
     limits: {cpu: 500m, memory: 1Gi}
   logGroomerSidecar:
-    resources:
+    resources:                      # 128Mi no alcanza: fue OOMKilled en Rancher
       requests: {cpu: 20m, memory: 128Mi}
       limits: {cpu: 200m, memory: 512Mi}
 
@@ -83,7 +83,7 @@ triggerer:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: 500m, memory: 768Mi}
   logGroomerSidecar:
-    resources:
+    resources:                      # 128Mi no alcanza: fue OOMKilled en Rancher
       requests: {cpu: 20m, memory: 128Mi}
       limits: {cpu: 200m, memory: 512Mi}
 
