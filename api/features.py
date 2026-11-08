@@ -4,7 +4,7 @@ IMPORTANTE: este archivo existe en DOS lugares y debe ser idéntico:
   * airflow/dags/diabetes_pipeline/features.py  (entrenamiento)
   * api/features.py                             (inferencia)
 Así el modelo recibe exactamente las mismas columnas en ambos lados (evita el
-"training/serving skew"). tests/test_features.py verifica que sean iguales.
+"training/serving skew"). tests/test_features_identicos.py verifica que sean iguales.
 
 Entrada: un DataFrame con las columnas originales del CSV (como texto o tipadas).
 Salida: un DataFrame con FEATURE_COLUMNS listo para el Pipeline de scikit-learn.
@@ -116,9 +116,16 @@ def _as_int(series: pd.Series, default: int = 0) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").fillna(default).astype(int)
 
 
+def clean_text(value: object) -> str:
+    """Limpieza de texto: quita espacios y convierte los marcadores de faltante
+    del dataset ('?', 'NULL', 'None', NaN, vacío) en una cadena vacía."""
+    text = _to_text(value)
+    return "" if text in MISSING_TOKENS else text
+
+
 def _clean_category(series: pd.Series, missing: str = "Unknown") -> pd.Series:
-    s = _as_str(series)
-    return s.where(~s.isin(MISSING_TOKENS), missing).astype(str)
+    values = [clean_text(v) or missing for v in series.to_numpy(dtype=object)]
+    return pd.Series(values, index=series.index, dtype=object).astype(str)
 
 
 def _lab_result(series: pd.Series) -> pd.Series:
@@ -127,16 +134,31 @@ def _lab_result(series: pd.Series) -> pd.Series:
     return s.where(~s.isin(MISSING_TOKENS), "None").astype(str)
 
 
-def _age_to_years(series: pd.Series) -> pd.Series:
-    """'[70-80)' -> 75.0 (punto medio del rango)."""
-    def parse(value: str) -> float:
-        match = re.match(r"\[(\d+)-(\d+)\)", str(value))
-        if not match:
-            return np.nan
-        low, high = int(match.group(1)), int(match.group(2))
-        return (low + high) / 2.0
+_AGE_PATTERN = re.compile(r"^\[(\d+)-(\d+)\)$")
 
-    years = _as_str(series).map(parse).astype(float)
+
+def parse_age_bracket(text: object) -> float:
+    """Convierte un rango de edad del dataset en su punto medio: '[70-80)' -> 75.0.
+
+    Lanza ValueError si el texto no tiene el formato '[a-b)' o si a >= b.
+    """
+    match = _AGE_PATTERN.match(clean_text(text))
+    if not match:
+        raise ValueError(f"Rango de edad inválido: {text!r}")
+    low, high = int(match.group(1)), int(match.group(2))
+    if low >= high:
+        raise ValueError(f"Rango de edad inválido (inicio >= fin): {text!r}")
+    return (low + high) / 2.0
+
+
+def _age_to_years(series: pd.Series) -> pd.Series:
+    def parse(value: object) -> float:
+        try:
+            return parse_age_bracket(value)
+        except ValueError:
+            return np.nan
+
+    years = series.map(parse).astype(float)
     return years.fillna(years.median() if years.notna().any() else 55.0)
 
 
@@ -227,6 +249,42 @@ def _medication_matrix(df: pd.DataFrame) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 # API pública
 # --------------------------------------------------------------------------- #
+# Rangos válidos (inclusive). Son los mismos que valida la API en schemas.py;
+# tests/test_api.py comprueba que no se desalineen.
+NUMERIC_RANGES = {
+    "admission_type_id": (1, 8),
+    "discharge_disposition_id": (1, 30),
+    "admission_source_id": (1, 26),
+    "time_in_hospital": (1, 14),
+    "num_lab_procedures": (0, 200),
+    "num_procedures": (0, 10),
+    "num_medications": (0, 100),
+    "number_outpatient": (0, 100),
+    "number_emergency": (0, 100),
+    "number_inpatient": (0, 100),
+    "number_diagnoses": (1, 20),
+}
+
+
+def numeric_range_violations(df: pd.DataFrame) -> pd.Series:
+    """Validación de rangos numéricos por fila.
+
+    Devuelve, para cada fila, el motivo del primer valor inválido
+    ('<columna>_fuera_de_rango') o None si todos los valores son válidos.
+    Un valor es inválido si no es numérico, no es entero o está fuera de
+    NUMERIC_RANGES. Lanza ValueError si falta alguna de las columnas.
+    """
+    missing = [c for c in NUMERIC_RANGES if c not in df.columns]
+    if missing:
+        raise ValueError(f"Faltan columnas numéricas: {missing}")
+    reason = pd.Series([None] * len(df), index=df.index, dtype=object)
+    for col, (low, high) in NUMERIC_RANGES.items():
+        values = pd.to_numeric(df[col], errors="coerce")
+        bad = values.isna() | (values < low) | (values > high) | (values != values.round())
+        reason[bad & reason.isna()] = f"{col}_fuera_de_rango"
+    return reason
+
+
 def missing_required_columns(columns: Iterable[str]) -> list[str]:
     present = set(columns)
     return [c for c in REQUIRED_SOURCE_COLUMNS if c not in present]

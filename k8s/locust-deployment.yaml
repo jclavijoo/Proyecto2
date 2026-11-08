@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: locust
-        image: joshin290/mlops-p2-locust:0.1.0
+        image: DOCKERHUB_USER/mlops-p2-locust:0.1.0
         command:
         - locust
         args:

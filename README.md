@@ -1,18 +1,7 @@
 # Proyecto 2 – MLOps en Kubernetes (Rancher): readmisión hospitalaria de pacientes diabéticos
 
-## Grupo 3
-
-### Integrantes
-* **Juan David Clavijo Ortiz**
-* **Laura Sofía Rodríguez Pérez**
-* **Joshua Alexander Valero Lozano**
-
-## Link de Youtube: https://youtu.be/iDZpyuTl-RY
-
-# Descripción
-
 Arquitectura MLOps completa desplegada en Kubernetes administrado con **Rancher** sobre las VMs
-Rocky, ingesta incremental orquestada con Airflow, capas RAW / CLEAN /
+Rocky Linux de la universidad: ingesta incremental orquestada con Airflow, capas RAW / CLEAN /
 INFERENCE en PostgreSQL, experimentos y registro de modelos en MLflow (PostgreSQL + MinIO), API
 de inferencia con FastAPI, interfaz en Streamlit, pruebas de carga con Locust y observabilidad
 con Prometheus + Grafana.
@@ -28,7 +17,7 @@ con Prometheus + Grafana.
 | Entrenamiento | PostgreSQL de datos (`raw`, `clean`, `inference`) | StatefulSet + PVC + Job de migración | interno |
 | Entrenamiento | MLflow 3.4.0 | Deployment | NodePort 30500 |
 | Entrenamiento | PostgreSQL de metadatos de MLflow | StatefulSet + PVC | interno |
-| Entrenamiento | MinIO (artefactos de MLflow) | StatefulSet + PVC | consola NodePort 30901 |
+| Entrenamiento | MinIO (artefactos de MLflow, imagen `ghcr.io/coollabsio/minio`) | StatefulSet + PVC | consola NodePort 30901 |
 | Inferencia | API FastAPI | Deployment | NodePort 30800 |
 | Inferencia | Streamlit | Deployment | NodePort 30501 |
 | Inferencia | Locust | Deployment | NodePort 30089 |
@@ -53,17 +42,37 @@ configuración está en ConfigMaps y las credenciales en Secrets. Todo vive en e
 ├── api/                        API FastAPI: Dockerfile, requirements.txt, main.py, features.py, ...
 ├── streamlit/                  Interfaz gráfica: Dockerfile, requirements.txt, app.py
 ├── locust/                     Dockerfile, requirements.txt, locustfile.py (como Niveles/3/locust)
-├── observabilidad/             
+├── observabilidad/             Como Niveles/3/Observabilidad
 │   ├── prometheus.yml          (docker compose)   prometheus-k8s.yml (Kubernetes)
 │   └── grafana/provisioning/ y grafana/dashboards/mlops-inference-api.json
 ├── db/                         Scripts SQL de creación de tablas (idempotentes)
+├── tests/                      Pruebas unitarias (pytest): preprocesamiento y API
+├── pytest.ini, requirements-test.txt, Dockerfile.test   Configuración y contenedor de las pruebas
+├── infra/                      StorageClass local-path (se aplica una vez por clúster)
 ├── k8s/                        Manifiestos: kubectl apply -f k8s/
-├── tests/                      Pruebas con pytest (como Niveles/3/CICD/unit_testing)
-├── .github/workflows/          CI: pruebas + publicación en DockerHub (plantilla del curso)
+├── .github/workflows/          CI/CD: pruebas en cada PR y publicación de la API en main
 ├── docs/guion_sustentacion.md
 └── notebooks/                  EDA
 ```
 
+## 3. Preparar el clúster en Rancher
+
+Sirve tanto el clúster **`local`** (K3s dentro del contenedor de Rancher) como un clúster
+**Custom RKE2 `mlops`** con varias VMs (guía `Niveles/3/Kubernetes`). Para esta arquitectura se
+recomienda el clúster Custom: el `local` comparte la VM con Rancher y las *requests* del
+proyecto suman ~3 CPU y ~8 GiB de RAM.
+
+**3.1 kubectl y Helm en la VM.** En Rancher, entre al clúster y use **Download KubeConfig**:
+
+```bash
+mkdir -p ~/.kube && vim ~/.kube/config      # pegar el kubeconfig del clúster
+chmod 600 ~/.kube/config
+kubectl get nodes
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+```
+
+Si usa varios clústeres, agregue `--kubeconfig ~/.kube/mlops.yaml` a cada comando `kubectl` y
+`helm`, como en la guía.
 
 **3.2 StorageClass (necesaria para los PVC).**
 
@@ -71,14 +80,21 @@ configuración está en ConfigMaps y las credenciales en Secrets. Todo vive en e
 kubectl get storageclass
 ```
 
-- Clúster `local` (K3s): ya trae `local-path (default)`. No hay que hacer nada.
-- Clúster Custom **RKE2**: **no trae ninguna**, y sin ella todos los PVC quedan en `Pending`.
-  Instale el aprovisionador de Rancher y márquelo por defecto:
+En ambos casos (el clúster `local` de Rancher en Docker tampoco la trae) instale el aprovisionador
+de Rancher, guarde los volúmenes dentro de `/var/lib/rancher` y márquelo por defecto:
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.31/deploy/local-path-storage.yaml
-kubectl patch storageclass local-path -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+kubectl apply -f infra/local-path-storage.yaml
+kubectl get storageclass        # debe decir: local-path (default)
 ```
+
+`infra/local-path-storage.yaml` es una copia del manifiesto oficial (v0.0.31) con la ruta y la
+marca de StorageClass por defecto ya ajustadas, así no depende de descargarlo desde GitHub
+(la red de las VMs puede bloquear `raw.githubusercontent.com`).
+
+En el clúster `local`, `/var/lib/rancher` es el directorio que el contenedor de Rancher monta
+desde el host (`-v /opt/rancher:/var/lib/rancher`), así los datos de las bases quedan fuera del
+contenedor y en el disco con más espacio.
 
 **3.3 Firewall.** Los NodePort (30000-32767) ya están abiertos si siguió la guía de nodos RKE2.
 
@@ -103,6 +119,10 @@ cd locust    && docker build -t su_usuario/mlops-p2-locust:0.1.0 .    && docker 
 
 Otra opción para las cuatro últimas imágenes: `cp .env.example .env`, poner su usuario en
 `DOCKERHUB_USER` y ejecutar `docker compose build` y luego `docker compose push`.
+
+Para probar en local sin Kubernetes basta con `docker compose up -d --build` (no necesita
+`.env`). Sin Airflow todavía no hay modelo entrenado, así que `/predict` responde 503 hasta
+que exista un `@champion` en MLflow.
 
 Si `airflow/data/Diabetes.csv` no está en la imagen, la primera tarea del DAG lo descarga.
 Cuando cambie el código, suba el tag (`0.1.1`, `0.1.2`…) en el build y en los manifiestos,
@@ -152,43 +172,49 @@ encabezado de cada archivo.
 
 ## 6. Acceso a las interfaces
 
-En un clúster **Custom RKE2**, use la IP de cualquier nodo:
+En el clúster `local` de Rancher los NodePort quedan dentro del contenedor de Rancher, así que
+desde la VM se llega a los servicios con `kubectl port-forward`. Este bloque los levanta todos
+en segundo plano (hay que repetirlo cada vez que un pod se recrea, por ejemplo después de un
+`helm upgrade`):
+
+```bash
+pkill -f "kubectl port-forward"
+for s in "airflow-api-server 8085:8080" "mlflow 5000:5000" "inference-api 8000:8000" \
+         "streamlit 8501:8501" "locust 8089:8089" "grafana 3000:3000" \
+         "minio 9001:9001" "prometheus 9090:9090"; do
+  set -- $s
+  nohup kubectl port-forward svc/$1 $2 > /tmp/pf-$1.log 2>&1 &
+done
+```
+
+Airflow va en el 8085 y no en el 8080 porque en nuestros computadores ese puerto ya estaba
+ocupado por un PostgreSQL de EDB.
+
+Si el computador no está en la red de la universidad, la IP de la VM no responde. En ese caso
+se usa la pestaña Ports de VS Code (conectado por Remote-SSH) para reenviar 8085, 5000, 8000,
+8501, 8089, 3000, 9001, 9090 y 443, y se abre todo como `http://localhost:<puerto>`.
+Rancher queda en `https://localhost`.
 
 | Interfaz | URL | Credenciales |
 |---|---|---|
-| Airflow | http://IP_NODO:30080 | admin / admin (usuario por defecto del chart) |
-| MLflow | http://IP_NODO:30500 | – |
-| MinIO | http://IP_NODO:30901 | `minio-secret` |
-| API (Swagger) | http://IP_NODO:30800/docs | – |
-| Streamlit | http://IP_NODO:30501 | – |
-| Locust | http://IP_NODO:30089 | – |
-| Prometheus | http://IP_NODO:30909 | – |
-| Grafana | http://IP_NODO:30300 | `grafana-secret` |
+| Airflow | http://localhost:8085 | admin / admin (usuario por defecto del chart) |
+| MLflow | http://localhost:5000 | – |
+| MinIO | http://localhost:9001 | `minio-secret` |
+| API (Swagger) | http://localhost:8000/docs | – |
+| Streamlit | http://localhost:8501 | – |
+| Locust | http://localhost:8089 | – |
+| Prometheus | http://localhost:9090 | – |
+| Grafana | http://localhost:3000 | `grafana-secret` |
 
-En el clúster **`local`**, los NodePort quedan dentro del contenedor de Rancher, así que se usa
-`port-forward` como en la guía:
-
-```bash
-kubectl port-forward --address 0.0.0.0 svc/streamlit 8501:8501
-kubectl port-forward --address 0.0.0.0 svc/grafana 3000:3000
-kubectl port-forward --address 0.0.0.0 svc/airflow-api-server 8080:8080
-# ... uno por terminal (o con & al final)
-```
+En un clúster Custom RKE2 con varias VMs, los mismos servicios quedan además en
+`http://IP_NODO:<NodePort>` (Airflow 30080, MLflow 30500, MinIO 30901, API 30800, Streamlit
+30501, Locust 30089, Prometheus 30909, Grafana 30300).
 
 ## 7. Ejecución y validación
 
 1. **Airflow:** active `diabetes_mlops_pipeline` y ejecútelo. Cada ejecución carga **un lote de
    15.000 filas**: el dataset (~101.766 filas) requiere 7 ejecuciones. Al terminar los datos,
    el DAG se detiene en `has_data_to_process`, salvo que se lance con `force_retrain=true`.
-
-    <p align="center">
-      <img src="evidencias/Airflow.png" alt="Ejecución de Airflow" width="800">
-    </p>
-
-    <p align="center">
-      <img src="evidencias/Airflow2.png" alt="Ejecución de Airflow" width="800">
-    </p>
-
 2. **Capas de datos:**
    ```bash
    kubectl exec -it postgres-data-0 -- psql -U mlops -d diabetes -c "SELECT batch_id, rows_read, rows_inserted, status FROM raw.load_batches;"
@@ -203,18 +229,6 @@ kubectl port-forward --address 0.0.0.0 svc/airflow-api-server 8080:8080
    curl http://IP_NODO:30800/model-info
    curl -X POST http://IP_NODO:30800/predict -H "Content-Type: application/json" -d '{"gender":"Female","age":"[70-80)","admission_type_id":1,"discharge_disposition_id":1,"admission_source_id":7,"time_in_hospital":5,"num_lab_procedures":45,"num_procedures":1,"num_medications":18,"diag_1":"428","number_diagnoses":9,"insulin":"Up","diabetesMed":"Yes"}'
    ```
-    <p align="center">
-      <img src="evidencias/API.png" alt="API 1" width="800">
-    </p>
-
-    <p align="center">
-      <img src="evidencias/API2_predict.png" alt="API 2" width="800">
-    </p>
-
-    <p align="center">
-      <img src="evidencias/API3_metrics.png" alt="API 3" width="800">
-    </p>
-
 5. **Streamlit:** use "Cargar ejemplo" y "Predecir". El escenario "Caso inválido" muestra los
    errores de validación de la API campo por campo.
 
@@ -238,9 +252,52 @@ error, CPU y memoria del pod, *throttling* de CPU, predicciones por clase y mode
 Locust corre dentro del clúster contra el Service de la API, así que la carga no pasa por un
 port-forward, que sería un cuello de botella artificial.
 
-## 9. Decisiones técnicas
+## 9. Pruebas unitarias y CI/CD
 
-### 9.1 Capas de datos
+Sigue la actividad de `Niveles/3/CICD`. El módulo probado es `api/features.py`, que es el
+preprocesamiento que comparten la API y el DAG:
+
+- Limpieza de texto: `clean_text` (espacios y marcadores de faltante como `?` o `NULL`) y
+  `parse_age_bracket` (`"[70-80)"` → 75.0, con `ValueError` si el formato no es válido).
+- Validación de rangos numéricos: `numeric_range_violations`, con los límites de
+  `NUMERIC_RANGES`. Son los mismos que valida la API y los que usa la tarea de calidad del DAG.
+- Transformación de features: `build_features`, `icd9_group`, `build_target`,
+  `exclusion_reason` y `assign_split`.
+
+Las pruebas están en `tests/`, en la raíz del repositorio: 19 funciones de prueba (42 casos con
+`parametrize`), dos de ellas con `pytest.raises`. `test_api.py` prueba además los endpoints con
+un modelo falso, sin necesitar MLflow ni PostgreSQL, y `test_features_identicos.py` verifica que
+las copias de `features.py` en la API y en Airflow sean idénticas. `pytest.ini` le indica a
+pytest que el código a probar está en `api/`.
+
+```bash
+# Local, desde la raíz del repositorio
+pip install -r api/requirements.txt -r requirements-test.txt
+pytest -v
+
+# En contenedor, desde la raíz del repositorio
+docker build -f Dockerfile.test -t mlops-p2-tests .
+docker run --rm mlops-p2-tests
+```
+
+El workflow `.github/workflows/ci-cd-unit-tests-dockerhub.yml` monitorea `api/**`, `tests/**`,
+los archivos de configuración de las pruebas, el `features.py` de Airflow y el propio workflow.
+En cada push o pull request que toque esas rutas corre el job `unit-tests`: ejecuta `pytest` y
+vuelve a ejecutar las pruebas dentro del contenedor de `Dockerfile.test`. Solo en un push a
+`main`, y solo si `unit-tests` pasó, el job `publish-dockerhub` publica `jclavijoo/mlops-p2-api`
+con los tags `latest` y el SHA del commit. Para desplegar esa imagen en el clúster, cambie el tag
+en `k8s/api-deployment.yaml` por el SHA y aplique el archivo.
+
+Para que un PR con pruebas fallidas no se pueda fusionar, en GitHub: Settings > Branches >
+Add branch protection rule (o Rules > Rulesets) sobre `main`, con "Require a pull request
+before merging" y "Require status checks to pass", eligiendo el check `unit-tests` (aparece en
+la lista después de que el workflow haya corrido al menos una vez). Como el workflow solo corre
+cuando cambian las rutas monitoreadas, un PR que solo toque, por ejemplo, el README queda
+esperando ese check; en ese caso un administrador puede fusionarlo igual.
+
+## 10. Decisiones técnicas
+
+### 10.1 Capas de datos
 
 Una instancia de PostgreSQL con tres esquemas separados (`raw`, `clean`, `inference`) y una
 instancia aparte para MLflow. Los esquemas permiten permisos distintos por capa: la API usa
@@ -258,7 +315,7 @@ esquema lo administra MLflow con sus propias migraciones.
   predicción, probabilidad, modelo, versión, alias, latencia y `request_id`. La vista
   `inference.v_hourly_summary` resume el tráfico por hora.
 
-### 9.2 Idempotencia, periodicidad y fallos del DAG
+### 10.2 Idempotencia, periodicidad y fallos del DAG
 
 - **Periodicidad:** `@hourly` (configurable con `PIPELINE_SCHEDULE`). Con `max_active_runs=1`
   nunca hay dos ejecuciones compitiendo por el mismo offset.
@@ -272,7 +329,7 @@ esquema lo administra MLflow con sus propias migraciones.
   Airflow y el reporte queda en `raw.quality_checks`. Si una partición queda sin suficientes
   positivos, también falla. Cada tarea tiene 1 reintento.
 
-### 9.3 Transformaciones (`features.py`)
+### 10.3 Transformaciones (`features.py`)
 
 | Decisión | Justificación |
 |---|---|
@@ -289,16 +346,16 @@ esquema lo administra MLflow con sus propias migraciones.
 
 `features.py` está en `airflow/dags/diabetes_pipeline/` y en `api/`, con exactamente el mismo
 contenido. Así el modelo recibe en producción las mismas columnas con las que se entrenó, lo que
-evita el *training/serving skew*. La prueba `tests/test_features.py` falla si las dos copias
+evita el *training/serving skew*. La prueba `tests/test_features_identicos.py` falla si las dos copias
 dejan de ser idénticas, así que si modifica una, copie el cambio a la otra.
 
-### 9.4 Particiones
+### 10.4 Particiones
 
 La partición se asigna con un hash de `patient_nbr`: 70 % train, 15 % val y 15 % test. El
 mismo paciente siempre queda en la misma partición aunque llegue en lotes distintos, así que
 no hay fuga entre train y test, y la partición es reproducible entre ejecuciones.
 
-### 9.5 Métrica principal y selección de modelos
+### 10.5 Métrica principal y selección de modelos
 
 La métrica principal es **F1 de la clase positiva (`<30`)**. La clase positiva es ~11 % del
 total, así que un modelo que siempre responde "NO" tendría ~89 % de accuracy y sería inútil.
@@ -312,7 +369,7 @@ como `@challenger`. Luego se re-evalúa el `@champion` sobre **el mismo conjunto
 vigente**, y solo se promueve el challenger si lo supera. El campeón anterior queda como
 `@previous-champion` para poder hacer rollback.
 
-### 9.6 Carga del modelo en la API
+### 10.6 Carga del modelo en la API
 
 La API resuelve `models:/diabetes-readmission@champion` al iniciar y carga esa versión una sola
 vez. Un hilo consulta cada 60 s a qué versión apunta el alias y, si cambió, descarga la nueva y
@@ -321,17 +378,19 @@ Si MLflow cae, la API sigue sirviendo con el último modelo cargado. Nunca se de
 por solicitud y no hay versiones ni rutas escritas en el código. El registro en la BD se hace
 como *BackgroundTask*, así que no suma latencia a la respuesta.
 
-### 9.7 Versiones fijadas (problemas encontrados en la validación)
+### 10.7 Versiones fijadas (problemas encontrados en la validación)
 
 | Hallazgo | Solución |
 |---|---|
 | `mlflow` 2.x exige `packaging<25`, y Airflow 3.1.8 exige `packaging>=25`: no se pueden instalar juntos | MLflow **3.4.0** en todas las imágenes |
 | MLflow 3.4 falla al arrancar con SQLAlchemy 2.1 (`FallbackAsyncAdaptedQueuePool`) | `sqlalchemy==2.0.36` en la imagen de MLflow |
+| `minio/minio` ya no está disponible en Docker Hub (`pull access denied`) | `ghcr.io/coollabsio/minio:RELEASE.2025-04-22T22-12-26Z` (versión fija, publicada en GitHub Container Registry) |
 | La imagen `apache/airflow:3.1.8` ya trae numpy 2.4.2, pandas 2.3.3 y scikit-learn 1.8.0 | Mismas versiones en Airflow y en la API (el pickle del modelo depende de ellas) |
 | El chart de Airflow más reciente ya no corresponde a Airflow 3.1.8 | Chart fijado en 1.20.0 (`AIRFLOW_CHART_VERSION`) |
+| FastAPI 0.115 emite advertencias de compatibilidad con pydantic 2.12 o posterior | `pydantic==2.11.7` en la API |
 | `build_features` tardaba 32 ms por fila en la API | Reescrito con numpy: 9,5 ms, con salida idéntica verificada sobre 40.025 filas |
 
-## 10. Validación realizada
+## 11. Pruebas antes del despliegue
 
 Antes de entregar la estructura se ejecutó una prueba de punta a punta (fuera de Kubernetes)
 con PostgreSQL 16, el servidor MLflow 3.4.0 levantado con el mismo comando del Deployment,
@@ -356,7 +415,98 @@ sintéticos. Los resultados reales saldrán al ejecutar el DAG con el dataset de
 Los manifiestos de `k8s/` se validaron con kubeconform (43 recursos válidos en Kubernetes 1.30)
 y los values de Helm contra el esquema oficial del chart 1.20.0.
 
-## 11. Problemas comunes
+## 12. Bitácora del despliegue
+
+### Qué hicimos
+
+Montamos el ciclo completo de un modelo de readmisión hospitalaria sobre Kubernetes. Los datos
+del archivo de diabetes entran por lotes de 15.000 filas, se guardan sin tocar en una tabla
+RAW, se limpian hacia una tabla CLEAN y con eso se entrenan tres modelos en cada ejecución. El
+mejor se registra en MLflow y, si le gana al modelo que está en producción, pasa a ser el nuevo
+`champion`. La API lo carga sola, Streamlit la consume, Locust le mete carga y Grafana muestra
+lo que pasa.
+
+Usamos Kubernetes porque lo pide el enunciado, pero también porque nos resolvió cosas que con
+docker compose habría tocado hacer a mano: si un pod se cae lo vuelve a levantar, escalar la
+API fue un solo comando (`kubectl scale`) y toda la configuración quedó escrita en archivos
+YAML que están en el repositorio. Lo administramos con Rancher porque es lo que se usó en el
+curso. Trabajamos sobre el clúster `local`, que es un K3s corriendo dentro del contenedor de
+Rancher en nuestra VM (4 núcleos y 15 GB de RAM).
+
+### Cómo quedó conectado Airflow
+
+Airflow lo instalamos con el chart oficial de Helm, igual que en la guía del curso, pero con
+una imagen propia que ya trae el DAG y las librerías (scikit-learn, pandas y el cliente de
+MLflow). Así no tuvimos que configurar git-sync. Fijamos el chart 1.20.0 porque es el que
+corresponde a Airflow 3.1.8; con el más reciente la imagen y el chart quedaban desalineados.
+
+Lo instalamos en el mismo namespace que todo lo demás (`mlops`). Eso hace que desde las tareas
+se pueda llegar a la base de datos con el nombre `postgres-data` y a MLflow con
+`http://mlflow:5000`, sin IPs. La configuración del pipeline (ruta del archivo, tamaño de
+lote, métrica, alias) está en el ConfigMap `pipeline-config` y entra a Airflow con
+`extraEnvFrom`; el usuario y la contraseña de la base de datos se leen del Secret
+`postgres-data-secret` con `extraEnv`, así que no aparecen en ningún archivo de Airflow.
+
+Usamos LocalExecutor, por lo que las tareas corren dentro del pod del scheduler. Por eso ese
+pod tiene el límite de memoria más alto (4 GiB): ahí es donde se entrena. Airflow no tiene las
+credenciales de MinIO; cuando registra un modelo se lo manda a MLflow por HTTP y es el servidor
+de MLflow (con `--serve-artifacts`) el que lo guarda en el bucket. La base de datos interna de
+Airflow es la que instala el propio chart y no se mezcla con las nuestras.
+
+### Resultados
+
+La primera ejecución promovió la versión 1 y la segunda la reemplazó con un random forest (F1
+en prueba de 0,2802 contra 0,2689 de la versión 1). La API cargó la versión 2 a los tres
+segundos de la promoción, sin reiniciarse. Un F1 cercano a 0,28 puede parecer bajo, pero solo
+alrededor del 11 % de los pacientes se readmite antes de 30 días: un modelo que dijera que
+todos se readmiten tendría F1 de 0,20 y uno que dijera que ninguno tendría 0. Por esa misma
+razón descartamos accuracy como métrica principal.
+
+Escalamos la API a tres réplicas. Las tres quedaron en el mismo nodo porque el clúster `local`
+tiene uno solo, así que comparten los 4 núcleos con Airflow, las bases de datos, Locust y
+Rancher. La mejora en solicitudes por segundo es real pero no se triplica: en algún punto el
+límite deja de ser la API y pasa a ser la CPU del nodo.
+
+### Lo que más nos costó
+
+Lo que más tiempo se llevó no fue el código sino la VM. Rancher llevaba caído desde el 22 de
+octubre y no nos habíamos dado cuenta, porque Docker mostraba el contenedor como `Up` aunque el
+K3s de adentro había muerto. Al mismo tiempo Docker guarda todo en `/var`, que en la plantilla
+de la VM es una partición de 15 GB, y Rancher ya ocupaba 10 de esos. Cuando intentamos
+descargar las imágenes del proyecto nos quedamos sin espacio. No se podía ampliar `/var`
+porque el disco no tenía espacio libre sin asignar, pero `/` sí tenía 20 GB sin usar. Al final
+reinstalamos Rancher montando sus datos en `/opt/rancher`, que está en `/`, y desde ahí el
+espacio dejó de ser un problema.
+
+Lo segundo fueron las versiones. MLflow 2.x no se puede instalar junto con Airflow 3.1.8 porque
+piden versiones opuestas de la librería `packaging`, así que pasamos a MLflow 3.4. Después el
+servidor de MLflow no arrancaba porque pip instalaba SQLAlchemy 2.1 y MLflow 3.4 todavía usa
+algo que se eliminó en esa versión; lo resolvimos fijando SQLAlchemy 2.0.36. También tuvimos
+que dejar scikit-learn, pandas y numpy exactamente iguales en la imagen de Airflow y en la de la
+API, porque el modelo se guarda en una y se carga en la otra.
+
+La red dio varios problemas seguidos. El firewall de Rocky bloqueaba el tráfico entre los
+contenedores de docker compose: la API resolvía el nombre de la base de datos pero nunca le
+llegaba respuesta. Lo arreglamos dándole a la red del compose un nombre fijo (`br-mlops`) y
+habilitando el reenvío en la zona `public` de firewalld. Además, desde nuestros computadores no
+llegamos directo a la IP de la VM, así que todo lo abrimos con el reenvío de puertos de VS Code.
+Y como desde la VM GitHub está bloqueado, tuvimos que incluir en el repositorio el manifiesto de
+la StorageClass y bajar Helm desde `get.helm.sh`.
+
+Del lado de Kubernetes salieron cosas más puntuales. El certificado del Rancher reinstalado no
+incluía la IP de la VM y `kubectl` no conectaba; como `localhost` sí estaba en el certificado,
+apuntamos el kubeconfig a `https://localhost/k8s/clusters/local`. El K3s de Rancher no trae
+StorageClass, así que los volúmenes no se creaban hasta que instalamos local-path-provisioner,
+configurado para guardar en `/var/lib/rancher/local-path`. El pod de Locust no arrancaba porque
+en el manifiesto pusimos los argumentos pero no el comando. Y los contenedores que limpian los
+logs de Airflow se morían por memoria con el límite de 128 MiB que les habíamos puesto; con
+`dmesg` vimos que adentro corre un proceso de unos 125 MB y lo subimos a 512 MiB.
+
+Por último, la imagen `minio/minio` ya no está en Docker Hub (usamos
+`ghcr.io/coollabsio/minio`) y MinIO no arranca si la contraseña tiene menos de 8 caracteres,
+algo que descubrimos cuando pusimos `admin` en el `.env`.
+
+## 13. Problemas comunes
 
 | Síntoma | Causa probable / solución |
 |---|---|
@@ -369,5 +519,15 @@ y los values de Helm contra el esquema oficial del chart 1.20.0.
 | El DAG no aparece | `kubectl logs deploy/airflow-dag-processor`; verifique el tag de la imagen de Airflow |
 | Error `invalid choice: 'api-server'` en Airflow | Chart e imagen desalineados: chart 1.20.0 ↔ Airflow 3.1.8 |
 | Grafana sin datos de CPU de cAdvisor | El clúster restringe `nodes/proxy`; las métricas del proceso de la API funcionan igual |
+| MinIO se cae con `Invalid credentials` | `MINIO_ROOT_PASSWORD` debe tener al menos 8 caracteres (en `.env` y en `k8s/01-secrets.yaml`) |
+| En docker compose, un contenedor no alcanza a otro (`no response`) aunque el nombre resuelve | El firewall de la VM bloquea el tráfico del bridge: `sudo firewall-cmd --zone=trusted --change-interface=br-mlops` (y lo mismo con `--permanent`) |
 | Cambió un `.sql` | Regenere `k8s/db-sql-configmap.yaml`, luego `kubectl delete job data-db-migrate` y `kubectl apply -f k8s/` |
-| No abre `http://IP_NODO:30xxx` en el clúster `local` | Use `kubectl port-forward --address 0.0.0.0` (§6) |
+| No abre ninguna interfaz | El `port-forward` se cae cuando el pod se recrea: vuelva a ejecutar el bloque de la §6 |
+
+## 14. Pendientes del equipo
+
+- [ ] Notebook de EDA en `notebooks/` (ver `notebooks/README.md`).
+- [ ] Cargar los lotes restantes del dataset (unas 5 ejecuciones más del DAG).
+- [ ] Prueba de carga con 1 y con 3 réplicas: anotar el punto de degradación de cada una.
+- [ ] Evidencia de las imágenes publicadas en DockerHub.
+- [ ] Video de sustentación de máximo 10 minutos (guion en `docs/guion_sustentacion.md`).

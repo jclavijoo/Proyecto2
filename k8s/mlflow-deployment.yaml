@@ -23,7 +23,7 @@ spec:
     spec:
       initContainers:
       - name: ensure-bucket
-        image: joshin290/mlops-p2-mlflow:0.1.0
+        image: DOCKERHUB_USER/mlops-p2-mlflow:0.1.0
         command:
         - python
         - /app/ensure_bucket.py
@@ -50,7 +50,7 @@ spec:
             memory: 256Mi
       containers:
       - name: mlflow
-        image: joshin290/mlops-p2-mlflow:0.1.0
+        image: DOCKERHUB_USER/mlops-p2-mlflow:0.1.0
         command:
         - sh
         - -c

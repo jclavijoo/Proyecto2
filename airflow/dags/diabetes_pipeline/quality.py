@@ -3,8 +3,8 @@
 Reglas por fila (las que fallan quedan REJECTED con su motivo):
   * encounter_id y patient_nbr numéricos.
   * readmitted dentro de {NO, >30, <30}.
-  * time_in_hospital entero entre 1 y 14 (criterio de construcción del dataset).
-  * Conteos clínicos numéricos y >= 0.
+  * Columnas numéricas enteras y dentro de NUMERIC_RANGES (features.py), los
+    mismos límites que valida la API (por ejemplo time_in_hospital entre 1 y 14).
   * encounter_id no repetido (contra lo ya validado y dentro del propio lote) -> DUPLICATE.
 
 Regla global: si la proporción de rechazados supera MAX_REJECT_RATIO la tarea
@@ -20,14 +20,9 @@ import psycopg2.extras
 
 from diabetes_pipeline import config
 from diabetes_pipeline.db import fetch_df, get_conn
-from diabetes_pipeline.features import VALID_TARGET_VALUES
+from diabetes_pipeline.features import VALID_TARGET_VALUES, numeric_range_violations
 
 log = logging.getLogger(__name__)
-
-COUNT_COLUMNS = ["num_lab_procedures", "num_procedures", "num_medications",
-                 "number_outpatient", "number_emergency", "number_inpatient",
-                 "number_diagnoses"]
-
 
 def evaluate_rows(df: pd.DataFrame) -> pd.Series:
     """Devuelve el motivo de rechazo por fila (None = válida)."""
@@ -39,12 +34,8 @@ def evaluate_rows(df: pd.DataFrame) -> pd.Series:
     for col in ("encounter_id", "patient_nbr"):
         flag(pd.to_numeric(df[col], errors="coerce").isna(), f"{col}_not_numeric")
     flag(~df["readmitted"].astype(str).str.strip().isin(VALID_TARGET_VALUES), "invalid_target")
-    tih = pd.to_numeric(df["time_in_hospital"], errors="coerce")
-    flag(tih.isna() | (tih < 1) | (tih > 14), "time_in_hospital_out_of_range")
-    for col in COUNT_COLUMNS:
-        values = pd.to_numeric(df[col], errors="coerce")
-        flag(values.isna() | (values < 0), f"{col}_invalid")
-    return reason
+    ranges = numeric_range_violations(df)
+    return reason.where(reason.notna(), ranges)
 
 
 def validate_pending(dag_run_id: str) -> dict:
