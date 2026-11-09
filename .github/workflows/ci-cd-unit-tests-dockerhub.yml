@@ -24,14 +24,6 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - "api/**"
-      - "tests/**"
-      - "pytest.ini"
-      - "requirements-test.txt"
-      - "Dockerfile.test"
-      - "airflow/dags/diabetes_pipeline/features.py"
-      - ".github/workflows/ci-cd-unit-tests-dockerhub.yml"
 
 env:
   PYTHON_VERSION: "3.12"
