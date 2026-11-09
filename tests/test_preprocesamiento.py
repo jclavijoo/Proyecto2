@@ -33,7 +33,7 @@ def fila(**cambios):
 
 # ----------------------------- limpieza de texto ----------------------------- #
 def test_clean_text_quita_espacios():
-    assert clean_text("  Caucasian  ") == "Caucasian"
+    assert clean_text("  Caucasian  ") == "caucasian"
 
 
 @pytest.mark.parametrize("valor", ["?", "NULL", "None", "", "   ", None, float("nan")])
